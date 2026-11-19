@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mi Tienda</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27><text y=%27.9em%27 font-size=%2790%27>🛍️</text></svg>">
+<style>
+:root{--bg:#f6f2fa;--card:#fff;--text:#1c1b1f;--muted:#49454f;--primary:#6750a4;--on:#fff;--line:#e7e0ec}
+@media (prefers-color-scheme:dark){:root{--bg:#141218;--card:#211f26;--text:#e6e0e9;--muted:#cac4d0;--primary:#cfbcff;--on:#381e72;--line:#36343b}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+header{background:var(--primary);color:var(--on);padding:14px 20px;display:flex;align-items:center;gap:12px}
+header h1{font-size:22px;margin:0}
+header svg{width:40px;height:40px;border-radius:10px;flex:none}
+main{max-width:720px;margin:0 auto;padding:16px}
+input,textarea{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);font:inherit}
+.card{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:16px;padding:14px;margin-top:12px;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.av{width:48px;height:48px;border-radius:12px;background:var(--primary);color:var(--on);display:grid;place-items:center;font-weight:700;font-size:22px;flex:none}
+.body{flex:1;min-width:0}
+.body h3{margin:0;font-size:17px}
+.body p{margin:2px 0;color:var(--muted);font-size:14px}
+.body small{color:var(--muted);font-size:12px;word-break:break-all}
+.btn,button{background:var(--primary);color:var(--on);border:0;border-radius:24px;padding:10px 18px;font:inherit;font-weight:600;text-decoration:none;cursor:pointer;flex:none}
+h2{margin:28px 0 4px;font-size:19px}
+form{display:grid;gap:10px;margin-top:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.note{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="26 26 56 58" aria-hidden="true"><rect x="0" y="0" width="108" height="108" fill="#6750A4"/><path fill="#fff" d="M34,50 h40 v26 a4,4 0 0 1 -4,4 h-32 a4,4 0 0 1 -4,-4 z"/><path fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" d="M44,50 v-4 a10,10 0 0 1 20,0 v4"/><path fill="none" stroke="#6750A4" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" d="M54,56 v12 M48,63 l6,6 l6,-6"/></svg>
+  <h1>Mi Tienda</h1>
+</header>
+
+<main>
+  <input id="q" type="search" placeholder="Buscar apps…" aria-label="Buscar apps">
+  <div id="list"></div>
+  <p id="empty" class="note" hidden>No hay apps que coincidan.</p>
+
+  <h2>Subí tu app</h2>
+  <p class="note">Completá los datos y se abre un pedido en GitHub. La app se revisa antes de aparecer en la tienda.</p>
+  <form id="up">
+    <input name="name" placeholder="Nombre de la app" required>
+    <textarea name="description" rows="2" placeholder="Descripción corta" required></textarea>
+    <input name="package" placeholder="Package (ej: com.miapp.juego)" required>
+    <div class="row">
+      <input name="version" placeholder="Versión (ej: 1.2)" required>
+      <input name="versionCode" type="number" min="1" placeholder="versionCode (ej: 12)" required>
+    </div>
+    <input name="url" type="url" placeholder="Link directo al APK (https://…)" required>
+    <button type="submit">Enviar para revisión</button>
+  </form>
+
+  <p class="note" style="margin-top:24px">Instalá solo apps de gente en la que confíes. Android te va a pedir permiso para instalar apps desconocidas.</p>
+</main>
+
+<script>
+// Cambiá esto por tu usuario y repo de GitHub
+const REPO = "TU_USUARIO/TU_REPO";
+
+// Se usa si no existe apps.json junto a este archivo
+const FALLBACK = [
+  {name:"App de ejemplo 1",description:"Descripción corta de la app.",package:"com.ejemplo.app1",version:"1.0",versionCode:1,url:"https://github.com/TU_USUARIO/TU_REPO/releases/download/v1/ejemplo1.apk"},
+  {name:"App de ejemplo 2",description:"Otra app de tu tienda.",package:"com.ejemplo.app2",version:"2.3",versionCode:23,url:"https://github.com/TU_USUARIO/TU_REPO/releases/download/v1/ejemplo2.apk"}
+];
+
+const $ = s => document.querySelector(s);
+let apps = [];
+
+function safeUrl(u){
+  try{ const x = new URL(u, location.href); return /^https?:$/.test(x.protocol) ? x.href : "#"; }
+  catch(e){ return "#"; }
+}
+
+function el(tag, cls, text){
+  const n = document.createElement(tag);
+  if(cls) n.className = cls;
+  if(text !== undefined) n.textContent = text;
+  return n;
+}
+
+function render(){
+  const q = $("#q").value.trim().toLowerCase();
+  const list = $("#list");
+  list.replaceChildren();
+  const shown = apps.filter(a => ((a.name||"") + " " + (a.description||"")).toLowerCase().includes(q));
+  $("#empty").hidden = shown.length > 0;
+  for(const a of shown){
+    const card = el("article","card");
+    const av = el("div","av",(a.name||"?").trim().charAt(0).toUpperCase());
+    const body = el("div","body");
+    body.append(
+      el("h3",null,a.name||"Sin nombre"),
+      el("p",null,a.description||""),
+      el("small",null,"v"+(a.version||"?")+(a.package ? " · "+a.package : ""))
+    );
+    const btn = el("a","btn","Descargar");
+    btn.href = safeUrl(a.url);
+    btn.rel = "noopener";
+    card.append(av, body, btn);
+    list.append(card);
+  }
+}
+
+async function load(){
+  try{
+    const r = await fetch("app/src/main/assets/apps.json",{cache:"no-store"});
+    if(!r.ok) throw new Error("sin catálogo");
+    apps = await r.json();
+  }catch(e){
+    apps = FALLBACK;
+  }
+  render();
+}
+
+$("#q").addEventListener("input", render);
+
+$("#up").addEventListener("submit", e => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const body =
+    "**Nombre:** " + f.name + "\n" +
+    "**Descripción:** " + f.description + "\n" +
+    "**Package:** " + f.package + "\n" +
+    "**Versión:** " + f.version + " (versionCode " + f.versionCode + ")\n" +
+    "**Link del APK:** " + f.url + "\n";
+  const u = "https://github.com/" + REPO + "/issues/new?title=" +
+    encodeURIComponent("Nueva app: " + f.name) + "&body=" + encodeURIComponent(body);
+  window.open(u, "_blank", "noopener");
+});
+
+load();
+</script>
+</body>
+</html>
