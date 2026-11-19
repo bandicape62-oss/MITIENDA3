@@ -1,4 +1,4 @@
-name: Build APK
+name: HTML a APK
 on:
   push:
     branches: [main]
@@ -9,17 +9,283 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Buscar el proyecto de Android
-        id: p
+      - name: Generar el proyecto Android desde index.html
         run: |
-          f=$(find . -name settings.gradle.kts | head -n 1)
-          if [ -z "$f" ]; then
-            echo "No encontré settings.gradle.kts en el repo. Archivos que hay:"
+          set -e
+          if [ ! -f index.html ]; then
+            echo "Falta index.html en la raíz del repo. Archivos que hay:"
             find . -path ./.git -prune -o -type f -print | head -n 60
             exit 1
           fi
-          echo "Proyecto en: $(dirname "$f")"
-          echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
+
+          A=android/app/src/main
+          mkdir -p android/app/src/main/assets
+          mkdir -p android/app/src/main/java/com/tienda/app
+          mkdir -p android/app/src/main/res/values
+          mkdir -p android/app/src/main/res/drawable
+          mkdir -p android/app/src/main/res/xml
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+
+          # La página y el catálogo van dentro de la app
+          cp index.html $A/assets/index.html
+          sed -i "s#TU_USUARIO/TU_REPO#${GITHUB_REPOSITORY}#g" $A/assets/index.html
+          if [ -f apps.json ]; then
+            cp apps.json $A/assets/apps.json
+          else
+            echo '[{"name":"App de ejemplo","description":"Creá un apps.json en tu repo para poner tus apps.","package":"com.ejemplo.app","version":"1.0","versionCode":1,"url":"https://github.com/TU_USUARIO/TU_REPO/releases/download/v1/ejemplo.apk"}]' > $A/assets/apps.json
+            sed -i "s#TU_USUARIO/TU_REPO#${GITHUB_REPOSITORY}#g" $A/assets/apps.json
+          fi
+
+          cat > android/settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "MiTienda"
+          include(":app")
+          EOF
+
+          cat > android/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          printf 'org.gradle.jvmargs=-Xmx2g\nandroid.useAndroidX=true\n' > android/gradle.properties
+
+          cat > android/app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.tienda.app"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.tienda.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+          }
+          EOF
+
+          cat > $A/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+              <application
+                  android:label="@string/app_name"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:theme="@style/Theme.Tienda">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
+              </application>
+          </manifest>
+          EOF
+
+          echo '<resources><string name="app_name">Mi Tienda</string></resources>' > $A/res/values/strings.xml
+          echo '<resources><color name="ic_launcher_background">#6750A4</color></resources>' > $A/res/values/colors.xml
+          echo '<resources><style name="Theme.Tienda" parent="android:Theme.Material.Light.NoActionBar"><item name="android:statusBarColor">#6750A4</item></style></resources>' > $A/res/values/themes.xml
+          echo '<paths><external-files-path name="apks" path="." /></paths>' > $A/res/xml/file_paths.xml
+
+          # Ícono propio: bolsa con flecha de descarga
+          cat > $A/res/drawable/ic_launcher_foreground.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#FFFFFF"
+                  android:pathData="M34,50 h40 v26 a4,4 0 0 1 -4,4 h-32 a4,4 0 0 1 -4,-4 z" />
+              <path android:strokeColor="#FFFFFF" android:strokeWidth="4" android:strokeLineCap="round"
+                  android:pathData="M44,50 v-4 a10,10 0 0 1 20,0 v4" />
+              <path android:strokeColor="#6750A4" android:strokeWidth="3.5"
+                  android:strokeLineCap="round" android:strokeLineJoin="round"
+                  android:pathData="M54,56 v12 M48,63 l6,6 l6,-6" />
+          </vector>
+          EOF
+          for n in ic_launcher ic_launcher_round; do
+            cat > $A/res/mipmap-anydpi-v26/$n.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+              <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+          done
+
+          cat > $A/java/com/tienda/app/MainActivity.kt <<'EOF'
+          package com.tienda.app
+
+          import android.annotation.SuppressLint
+          import android.app.Activity
+          import android.app.DownloadManager
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.content.IntentFilter
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.Message
+          import android.provider.Settings
+          import android.webkit.URLUtil
+          import android.webkit.WebChromeClient
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebResourceResponse
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.Toast
+          import androidx.core.content.ContextCompat
+          import androidx.core.content.FileProvider
+          import java.io.ByteArrayInputStream
+          import java.io.File
+          import java.net.HttpURLConnection
+          import java.net.URL
+
+          class MainActivity : Activity() {
+
+              private val catalogUrl = "__CATALOG__"
+              private lateinit var web: WebView
+              private val pending = mutableMapOf<Long, String>()
+
+              private val receiver = object : BroadcastReceiver() {
+                  override fun onReceive(c: Context, i: Intent) {
+                      val id = i.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+                      val name = pending.remove(id) ?: return
+                      install(File(getExternalFilesDir(null), name))
+                  }
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  web = WebView(this)
+                  setContentView(web)
+                  web.settings.javaScriptEnabled = true
+                  web.settings.domStorageEnabled = true
+                  web.settings.setSupportMultipleWindows(true)
+                  web.settings.javaScriptCanOpenWindowsAutomatically = true
+
+                  web.webViewClient = object : WebViewClient() {
+                      // El HTML pide apps.json: se lo damos desde GitHub (o el que viene en la app)
+                      override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? {
+                          if (r.url.host == "tienda.local" && r.url.path.orEmpty().endsWith("apps.json")) {
+                              val data = readCatalog()
+                              return if (data != null) {
+                                  WebResourceResponse("application/json", "utf-8", ByteArrayInputStream(data))
+                              } else {
+                                  WebResourceResponse("application/json", "utf-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+                              }
+                          }
+                          return null
+                      }
+                  }
+
+                  // Los links que abren pestaña nueva (como el formulario) van al navegador
+                  web.webChromeClient = object : WebChromeClient() {
+                      override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+                          val tmp = WebView(this@MainActivity)
+                          tmp.webViewClient = object : WebViewClient() {
+                              override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
+                                  this@MainActivity.startActivity(Intent(Intent.ACTION_VIEW, r.url))
+                                  return true
+                              }
+                          }
+                          (resultMsg.obj as WebView.WebViewTransport).webView = tmp
+                          resultMsg.sendToTarget()
+                          return true
+                      }
+                  }
+
+                  web.setDownloadListener { url, _, cd, mime, _ -> download(url, cd, mime) }
+
+                  ContextCompat.registerReceiver(
+                      this, receiver,
+                      IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                      ContextCompat.RECEIVER_EXPORTED
+                  )
+
+                  val html = assets.open("index.html").bufferedReader().use { it.readText() }
+                  web.loadDataWithBaseURL("https://tienda.local/", html, "text/html", "utf-8", null)
+              }
+
+              override fun onDestroy() {
+                  unregisterReceiver(receiver)
+                  super.onDestroy()
+              }
+
+              private fun readCatalog(): ByteArray? = try {
+                  val con = URL(catalogUrl).openConnection() as HttpURLConnection
+                  con.connectTimeout = 8000
+                  con.readTimeout = 8000
+                  con.inputStream.use { it.readBytes() }
+              } catch (e: Exception) {
+                  try {
+                      assets.open("apps.json").use { it.readBytes() }
+                  } catch (e2: Exception) {
+                      null
+                  }
+              }
+
+              private fun download(url: String, cd: String?, mime: String?) {
+                  if (!packageManager.canRequestPackageInstalls()) {
+                      Toast.makeText(this, "Habilitá instalar apps desconocidas para Mi Tienda y volvé a tocar Descargar", Toast.LENGTH_LONG).show()
+                      startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                      return
+                  }
+                  var name = URLUtil.guessFileName(url, cd, mime)
+                  if (!name.endsWith(".apk")) name += ".apk"
+                  File(getExternalFilesDir(null), name).delete()
+                  val req = DownloadManager.Request(Uri.parse(url))
+                      .setTitle(name)
+                      .setMimeType("application/vnd.android.package-archive")
+                      .setDestinationInExternalFilesDir(this, null, name)
+                      .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                  val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+                  pending[dm.enqueue(req)] = name
+                  Toast.makeText(this, "Descargando…", Toast.LENGTH_SHORT).show()
+              }
+
+              private fun install(file: File) {
+                  val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                  startActivity(
+                      Intent(Intent.ACTION_VIEW)
+                          .setDataAndType(uri, "application/vnd.android.package-archive")
+                          .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                  )
+              }
+          }
+          EOF
+
+          sed -i "s#__CATALOG__#https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/apps.json#" $A/java/com/tienda/app/MainActivity.kt
 
       - uses: actions/setup-java@v4
         with:
@@ -31,10 +297,10 @@ jobs:
           gradle-version: 8.7
 
       - name: Compilar
-        working-directory: ${{ steps.p.outputs.dir }}
+        working-directory: android
         run: gradle assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
           name: MiTienda-apk
-          path: "**/build/outputs/apk/debug/app-debug.apk"
+          path: android/app/build/outputs/apk/debug/app-debug.apk
